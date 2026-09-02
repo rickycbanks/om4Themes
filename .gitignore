@@ -1,0 +1,8 @@
+work/
+__pycache__/
+.venv/
+.pytest_cache/
+*.pyc
+_site/
+analyzer/*.egg-info/
+analyzer/.pytest_cache/

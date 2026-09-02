@@ -1,0 +1,49 @@
+name: build
+
+on:
+  schedule:
+    - cron: "0 6 * * 0"
+  workflow_dispatch:
+    inputs:
+      full_rescan:
+        description: "Force full rescan ignoring cache"
+        type: boolean
+        default: false
+      omarchy_ref:
+        description: "Force an Omarchy tag; empty = latest stable"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  issues: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: analyzer placeholder
+        run: echo "analyzer wired in Phase 7"
+
+  deploy:
+    needs: analyze
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v4
+        # TODO: re-verify action versions (plan §13) before Phase 7 — check latest major of configure-pages / upload-pages-artifact / deploy-pages
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -r site/* _site/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

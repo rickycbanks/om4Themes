@@ -1,0 +1,38 @@
+/* om4Themes — minimal placeholder styles (Phase 6 will replace) */
+:root {
+  --bg: #0f1115;
+  --fg: #e6e6e6;
+  --muted: #9aa0a6;
+  --accent: #7aa2f7;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  line-height: 1.5;
+}
+
+header, main, footer {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+h1 { margin: 0 0 0.25rem; }
+
+.placeholder {
+  padding: 1rem;
+  border: 1px dashed var(--muted);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+a { color: var(--accent); }
+a:hover { text-decoration: underline; }
+
+footer { color: var(--muted); font-size: 0.9rem; }

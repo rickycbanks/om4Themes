@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "om4t"
+version = "0.1.0"
+description = "om4Themes analyzer — theme compatibility observatory for Omarchy 4/Quattro"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "om4Themes contributors" }]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = ["om4t"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

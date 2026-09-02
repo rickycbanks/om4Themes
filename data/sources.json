@@ -1,0 +1,6 @@
+{
+  "_comment": "Curated seeds for theme discovery. seeds: extra repo URLs (e.g. awesome-omarchy entries, known authors). allowlist: force-include repos that lack the topic. blocklist: exclude spam/forks (owner/repo). Discovery merges topic search + built-ins + registry + these lists, then dedupes.",
+  "seeds": [],
+  "allowlist": [],
+  "blocklist": []
+}
