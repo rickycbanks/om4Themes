@@ -146,7 +146,7 @@ BADGE_PROBES: list[dict] = [
     {
         "badge_id": "transparency",
         "globs": [],
-        "regexes": [r"\*-fill-alpha", r"\*-border-alpha", r"rgba\("],
+        "regexes": [r"[\w-]*fill[\w-]*alpha", r"[\w-]*border[\w-]*alpha", r"rgba\("],
         "description": "Transparency via fill/border alpha or rgba()",
     },
     {
