@@ -16,7 +16,7 @@ from om4t.schema import (
 
 
 def _golden_theme() -> ThemeRecord:
-    """Golden record mirroring implementation-plan §14 rose-pine-custom example."""
+    """Golden record exercising every schema field (rose-pine-custom example shape)."""
     return ThemeRecord(
         id="some-owner/rose-pine-custom",
         repo_url="https://github.com/some-owner/rose-pine-custom",

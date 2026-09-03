@@ -210,6 +210,7 @@ jobs:
   deploy:
     needs: analyze
     runs-on: ubuntu-latest
+    permissions: { contents: write, pages: write, id-token: write }
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -223,7 +224,7 @@ jobs:
           path: _artifact_themes
 
       - uses: actions/configure-pages@v4
-        # TODO: re-verify action versions (plan §13) before Phase 7 — check latest major of configure-pages / upload-pages-artifact / deploy-pages
+        # TODO: re-verify action versions before Phase 7 — check latest major of configure-pages / upload-pages-artifact / deploy-pages
 
       - name: Assemble site
         run: |
@@ -255,6 +256,22 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Stamp last build date in README
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          DATE="$(date -u +%Y-%m-%d)"
+          sed -Ei "s/^(\*\*Last full build:\*\* )[^<]*(<!-- last-build-date -->)/\1${DATE} \2/" README.md
+          if git diff --quiet README.md; then
+            echo "README stamp unchanged"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "chore: update last build stamp (${DATE}) [skip ci]"
+            git push
+          fi
 
   notify:
     needs: [analyze, deploy]
