@@ -141,7 +141,7 @@ L1  if alacritty_convertible and render_clean             # legacy layer only; c
 L2  if colors_toml_valid and render_clean                 # native palette renders
 L3  if L2 and not legacy_hard and no blocking legacy_soft # + nothing required is legacy
         and modern_conventions                            # + designed around Quattro
-L4  if L3 and install_sim_clean against OMARCHY_TAG       # verified end-to-end by this CI
+L4  if L3 and install_sim_clean against OMARCHY_TAG       # completes without errors (stripped-but-regenerated files are warnings)
 ```
 
 Every grade stores an **ordered reason list** (the spec's "why it got its rating"), e.g. `Native colors.toml ✓ · Quattro renderer ✓ · No legacy Waybar dependency ✓ · No old state-path references ✓ · Custom Quickshell styling ✓`.
@@ -176,6 +176,12 @@ Per theme, in a throwaway directory:
 6. Record `tested_against: <resolved-tag>`, `omarchy_commit`, `analyzed_at`.
 
 **To confirm during implementation (Phase 4):** read `bin/omarchy-theme-set-templates` source to pin down its exact env-var/PATH contract, and locate Omarchy's theme-staging test under `test/` (research saw it referenced but couldn't fetch the exact path). Both are checklist items.
+
+**Verified contract (2026-09-02, v4.0.1):**
+- `next-theme` dir must be pre-created **with** theme files copied in; renderer reads `$NEXT/colors.toml` and silently no-ops (exit 0) if absent.
+- When writing `$NEXT/<tpl-basename>` the renderer **skips** any filename already present — theme-shipped overrides win, so scan the whole `next-theme` dir.
+- `omarchy-theme-color` is invoked as a bare command — CI must prepend `$OM/bin` to `PATH` (`omarchy-theme-set-templates` itself only uses `OMARCHY_PATH`+`HOME`).
+- Placeholder scan must be binary-safe: read bytes, skip files with `b"\x00"` in first 1024 B (PNG/JPG), regex `\{\{[^}]+\}\}` on decoded text.
 
 ## 10. Feature & legacy detection (static)
 

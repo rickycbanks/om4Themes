@@ -28,7 +28,7 @@ def determine_level(static: StaticFindings, verify: VerifyResult) -> int:
     - legacy hard caps at 1 if colors_valid else 0
     - L2 requires colors_valid AND render_clean
     - L3 adds no hard-legacy + modern_conventions (not uses_sanitizer)
-    - L4 adds install_sim_clean
+    - L4 adds install_sim_clean (render_clean and no appearance-critical stripped)
     Returns level 0-4.
     """
     colors_valid = static.colors_toml_valid
@@ -36,9 +36,10 @@ def determine_level(static: StaticFindings, verify: VerifyResult) -> int:
     render_clean = verify.render_clean
     legacy_hard = _has_legacy_hard(static)
     modern = not static.uses_sanitizer_stripped_for_appearance
-    # install_sim_clean: no appearance-affecting stripped file and render clean and pipeline ok
-    # heuristic: stripped empty and modern and render_clean and no error
-    install_clean = render_clean and not verify.stripped and modern and verify.error is None
+    # install_sim_clean: per spec L4 = "installs/sanitizes/renders ... completes without errors"
+    # Stripping per se is not a failure — standard files (neovim.lua, terminal configs) are regenerated from palette.
+    # Appearance-critical stripping is already captured by modern_conventions (caps at L2).
+    install_clean = render_clean and verify.error is None and modern
 
     has_palette = colors_valid or alacritty
 
@@ -87,7 +88,7 @@ def _build_checks(static: StaticFindings, verify: VerifyResult) -> list[CheckRes
     colors_valid = static.colors_toml_valid
     legacy_hard = _has_legacy_hard(static)
     modern = not static.uses_sanitizer_stripped_for_appearance
-    install_clean = verify.render_clean and not verify.stripped and modern and verify.error is None
+    install_clean = verify.render_clean and verify.error is None and modern
 
     checks: list[CheckResult] = []
     # Order = evaluation order per task
@@ -125,12 +126,12 @@ def _build_checks(static: StaticFindings, verify: VerifyResult) -> list[CheckRes
     if install_clean:
         checks.append(CheckResult(id="install_sim_clean", passed=True, note="Install simulation clean ✓"))
     else:
-        if verify.stripped:
-            note = f"{len(verify.stripped)} file(s) dropped by sanitizer: {', '.join(s['file'] for s in verify.stripped[:2])}"
-        elif not verify.render_clean:
+        if not verify.render_clean:
             note = "render not clean"
         elif not modern:
             note = "appearance depends on stripped file"
+        elif verify.error:
+            note = verify.error[:200]
         else:
             note = "install simulation not clean"
         checks.append(CheckResult(id="install_sim_clean", passed=False, note=note))
@@ -224,6 +225,16 @@ def grade_theme(
     # Also add parse_error as warning?
     if static.parse_error:
         warnings.append(f"colors.toml parse error: {static.parse_error}")
+    # Stripped files are warnings (regenerated from palette) when not appearance-critical
+    if verify.stripped and not static.uses_sanitizer_stripped_for_appearance:
+        files = ", ".join(s["file"] for s in verify.stripped[:5])
+        if len(verify.stripped) > 5:
+            files += f", +{len(verify.stripped)-5} more"
+        warnings.append(f"{len(verify.stripped)} file(s) dropped by sanitizer (regenerated from palette): {files}")
+    elif verify.stripped and static.uses_sanitizer_stripped_for_appearance:
+        # Appearance-critical stripping already caps level, also warn
+        files = ", ".join(s["file"] for s in verify.stripped[:5])
+        warnings.append(f"{len(verify.stripped)} file(s) dropped by sanitizer (appearance-critical): {files}")
     # Add synthesize info?
     if verify.synthesized_colors:
         warnings.append("colors synthesized from alacritty.toml")

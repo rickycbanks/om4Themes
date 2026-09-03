@@ -101,9 +101,9 @@ def test_L2_requires_colors_and_render():
 
 def test_L3_adds_no_hard_legacy_and_modern():
     static = _static(has_colors=True, valid=True, legacy_hard=False, uses_sanitizer=False)
-    # stripped non-empty => install_clean false => stays 3
+    # stripped non-empty but unreferenced (modern True) should NOT block L4 -> now L4 via install_clean without stripped check
     verify = _verify(render_clean=True, stripped=[{"file": "neovim.lua", "reason": "x"}])
-    assert determine_level(static, verify) == 3
+    assert determine_level(static, verify) == 4
 
 
 def test_L4_requires_install_sim_clean():
@@ -132,10 +132,25 @@ def test_legacy_hard_caps_at_1_if_valid():
 
 
 def test_L4_not_without_install_clean():
-    static = _static(has_colors=True, valid=True, legacy_hard=False, uses_sanitizer=False)
+    # Appearance-critical stripped (referenced .lua) caps at L2 via modern_conventions, so never reaches L4
+    static = _static(has_colors=True, valid=True, legacy_hard=False, uses_sanitizer=True)
     verify = _verify(render_clean=True, stripped=[{"file": "a.lua", "reason": "x"}])
     lvl = determine_level(static, verify)
-    assert lvl == 3  # not 4 because stripped not empty
+    assert lvl == 2  # modern False => cap at L2, install_sim_clean false
+
+
+def test_unreferenced_lua_does_not_block_L4():
+    """Regression: unreferenced .lua (sanitizer stripped but not appearance-critical) must not block L4."""
+    static = _static(has_colors=True, valid=True, legacy_hard=False, uses_sanitizer=False)
+    verify = _verify(render_clean=True, stripped=[{"file": "neovim.lua", "reason": "x"}, {"file": "vscode.json", "reason": "x"}])
+    assert determine_level(static, verify) == 4
+    pin = _pin()
+    rec = grade_theme(None, static, verify, pin, {"id": "a/b", "full_name": "a/b"})
+    assert rec.compatibility.level == 4
+    assert "headless-verified" in rec.badges
+    # Stripped files must appear as warning, never silent
+    assert any("dropped by sanitizer" in w and "neovim.lua" in w for w in rec.warnings)
+    assert any(c.id == "install_sim_clean" and c.passed for c in rec.checks)
 
 
 def test_grade_populates_schema_fields():

@@ -159,3 +159,160 @@ def test_verify_theme_integration(tmp_path):
     assert isinstance(vr.stripped, list)
     assert isinstance(vr.symlink_skipped, list)
     assert vr.synthesized_colors is False
+
+
+# --- OfficialRenderer hermetic tests with FAKE omarchy tree ---
+
+def _make_fake_omarchy(tmp_path: Path) -> Path:
+    fake = tmp_path / "fakeOM"
+    bin_dir = fake / "bin"
+    bin_dir.mkdir(parents=True)
+    themed_dir = fake / "default" / "themed"
+    themed_dir.mkdir(parents=True)
+    # Minimal template files (content irrelevant, fake script ignores them but they exist)
+    (themed_dir / "alacritty.toml.tpl").write_text("background = {{ background }}\n")
+    (themed_dir / "ghostty.conf.tpl").write_text("background={{ background }}\n")
+
+    # Stub omarchy-theme-color
+    color_stub = bin_dir / "omarchy-theme-color"
+    color_stub.write_text("#!/bin/bash\necho 'dummy'\nexit 0\n")
+    color_stub.chmod(0o755)
+
+    # Fake omarchy-theme-set-templates script per contract
+    # Asserts HOME/.local/state/omarchy/current/next-theme/colors.toml exists (exit 3 if not)
+    # Asserts omarchy-theme-color resolvable via command -v (exit 4 if not)
+    # Then writes rendered outputs into next-theme, substituting first hex via grep, and skips pre-existing files
+    script = bin_dir / "omarchy-theme-set-templates"
+    script.write_text(
+        """#!/bin/bash
+set -e
+NEXT="$HOME/.local/state/omarchy/current/next-theme"
+COLORS_FILE="$NEXT/colors.toml"
+if [[ ! -f "$COLORS_FILE" ]]; then
+  echo "missing colors.toml at $COLORS_FILE" >&2
+  exit 3
+fi
+if ! command -v omarchy-theme-color >/dev/null 2>&1; then
+  echo "omarchy-theme-color not found on PATH" >&2
+  exit 4
+fi
+bg=$(grep -Eo '#[0-9A-Fa-f]{6}' "$COLORS_FILE" | head -n1)
+if [[ -z "$bg" ]]; then bg="#000000"; fi
+# Render outputs only if not already present (theme-shipped overrides win)
+if [[ ! -f "$NEXT/alacritty.toml" ]]; then
+  echo "background = \\"$bg\\"" > "$NEXT/alacritty.toml"
+fi
+if [[ ! -f "$NEXT/ghostty.conf" ]]; then
+  echo "background=$bg" > "$NEXT/ghostty.conf"
+fi
+exit 0
+"""
+    )
+    script.chmod(0o755)
+    return fake
+
+
+def test_official_renderer_fake_omarchy_binary_safe(tmp_path):
+    from om4t.verify import OfficialRenderer, stage_theme
+
+    fakeOM = _make_fake_omarchy(tmp_path)
+
+    # Staged theme with colors.toml + binary png containing {{ bytes and null
+    theme = tmp_path / "theme_src"
+    theme.mkdir()
+    (theme / "colors.toml").write_text('mode="dark"\nbackground="#1a2b3c"\nforeground="#ffffff"\n')
+    # Create binary PNG with embedded {{ and null byte in first 1024
+    png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR{{ not_a_template }}\x00\xff" + b"\x00" * 200
+    (theme / "preview.png").write_bytes(png_bytes)
+
+    stage_root = tmp_path / "stage"
+    stage_root.mkdir()
+    res = stage_theme(theme, stage_root, is_git_installed=True)
+    # res.staged_path contains colors.toml and preview.png
+
+    renderer = OfficialRenderer(str(fakeOM))
+    clean, code, log = renderer.render(res.staged_path)
+    assert code == 0, f"log: {log}"
+    assert clean is True, f"binary png should not cause false positive, log: {log}"
+    # Verify preview.png was copied to next-theme and is binary-skipped
+    next_theme = stage_root / ".local" / "state" / "omarchy" / "current" / "next-theme"
+    assert (next_theme / "preview.png").is_file()
+    assert (next_theme / "colors.toml").is_file()
+    # Rendered files should exist
+    assert (next_theme / "alacritty.toml").is_file()
+    assert (next_theme / "ghostty.conf").is_file()
+
+
+def test_official_renderer_placeholder_failure_and_skip(tmp_path):
+    from om4t.verify import OfficialRenderer, stage_theme
+
+    fakeOM = _make_fake_omarchy(tmp_path)
+
+    theme = tmp_path / "theme_src2"
+    theme.mkdir()
+    (theme / "colors.toml").write_text('mode="dark"\nbackground="#112233"\n')
+    # Theme-shipped file that contains unrendered placeholder and will be copied to next-theme
+    # Name it so fake renderer will NOT overwrite: ghostty.conf already handled as skip case
+    # We'll use a file that the fake script doesn't generate, e.g. extra.conf with placeholder
+    (theme / "extra.conf").write_text("value = {{ leftover_placeholder }}\n")
+
+    stage_root = tmp_path / "stage2"
+    stage_root.mkdir()
+    res = stage_theme(theme, stage_root, is_git_installed=True)
+
+    renderer = OfficialRenderer(fakeOM)
+    clean, code, log = renderer.render(res.staged_path)
+    # Should be not clean because extra.conf still contains {{
+    assert code == 0
+    assert clean is False, f"expected placeholder detection, log: {log}"
+
+
+def test_official_renderer_relative_path(tmp_path, monkeypatch):
+    from om4t.verify import OfficialRenderer, stage_theme
+    import os
+
+    fakeOM = _make_fake_omarchy(tmp_path)
+
+    # Create a relative path string from tmp_path perspective
+    # Use monkeypatch to chdir and use relative path
+    rel = os.path.relpath(fakeOM, start=tmp_path)
+    # Ensure rel is not absolute
+    assert not Path(rel).is_absolute()
+
+    # Change cwd to tmp_path so relative resolves correctly
+    monkeypatch.chdir(tmp_path)
+
+    theme = tmp_path / "theme_rel"
+    theme.mkdir()
+    (theme / "colors.toml").write_text('mode="dark"\nbackground="#abcdef"\n')
+
+    stage_root = tmp_path / "stage_rel"
+    stage_root.mkdir()
+    res = stage_theme(theme, stage_root, is_git_installed=True)
+
+    renderer = OfficialRenderer(rel)
+    # Constructor should resolve to absolute
+    assert renderer.omarchy_dir.is_absolute(), "omarchy_dir should be resolved to absolute"
+    clean, code, log = renderer.render(res.staged_path)
+    assert code == 0
+    assert clean is True
+
+
+def test_official_renderer_requires_colors_toml(tmp_path):
+    from om4t.verify import OfficialRenderer, stage_theme
+
+    fakeOM = _make_fake_omarchy(tmp_path)
+
+    theme = tmp_path / "theme_nocolor"
+    theme.mkdir()
+    (theme / "README.md").write_text("no colors")
+
+    stage_root = tmp_path / "stage_nocolor"
+    stage_root.mkdir()
+    res = stage_theme(theme, stage_root, is_git_installed=True)
+
+    renderer = OfficialRenderer(fakeOM)
+    clean, code, log = renderer.render(res.staged_path)
+    # Fake script exits 3 when colors.toml missing -> render should be not clean
+    assert code == 3
+    assert clean is False

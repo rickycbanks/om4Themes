@@ -232,7 +232,32 @@ class OfficialRenderer:
     """
 
     def __init__(self, omarchy_dir: str | Path):
-        self.omarchy_dir = Path(omarchy_dir)
+        self.omarchy_dir = Path(omarchy_dir).resolve()
+
+    def _copy_staged_to_next(self, staged_path: Path, next_theme_dir: Path) -> None:
+        """Copy staged theme contents into next_theme_dir, regular files only, never follow symlinks."""
+        for root, dirs, files in os.walk(staged_path, topdown=True, followlinks=False):
+            root_path = Path(root)
+            # Skip symlink dirs, don't descend
+            new_dirs = []
+            for d in list(dirs):
+                dir_full = root_path / d
+                if dir_full.is_symlink():
+                    continue
+                new_dirs.append(d)
+            dirs[:] = new_dirs
+            rel_root = root_path.relative_to(staged_path) if root_path != staged_path else Path(".")
+            for fname in files:
+                src = root_path / fname
+                if src.is_symlink() or not src.is_file():
+                    continue
+                if rel_root == Path("."):
+                    rel = Path(fname)
+                else:
+                    rel = rel_root / fname
+                dest = next_theme_dir / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dest)
 
     def render(self, staged_path: str | Path) -> tuple[bool, int | None, str]:
         """
@@ -258,6 +283,13 @@ class OfficialRenderer:
         # Also need to ensure $STAGE dir exists
         stage_root.mkdir(parents=True, exist_ok=True)
 
+        # Fix #1: copy staged theme dir contents into next_theme_dir before invoking
+        # (renderer requires COLORS_FILE at $NEXT_THEME_DIR/colors.toml and skips pre-existing files)
+        try:
+            self._copy_staged_to_next(staged_path, next_theme_dir)
+        except Exception as e:
+            return (False, None, f"copy to next-theme failed: {e}")
+
         script = self.omarchy_dir / "bin" / "omarchy-theme-set-templates"
         # Check script exists
         if not script.is_file():
@@ -266,8 +298,8 @@ class OfficialRenderer:
         env = os.environ.copy()
         env["OMARCHY_PATH"] = str(self.omarchy_dir)
         env["HOME"] = str(stage_root)
-        # Also set OMARCHY env? Some scripts use OMARCHY_PATH
-        # Ensure PATH includes omarchy bin?
+        # Fix #4: prepend omarchy bin to PATH for bare omarchy-theme-color invocation
+        env["PATH"] = str(self.omarchy_dir / "bin") + os.pathsep + env.get("PATH", "")
 
         try:
             result = subprocess.run(
@@ -286,20 +318,23 @@ class OfficialRenderer:
             if exit_code != 0:
                 return (False, exit_code, log)
 
-            # Python regex scan over ALL rendered files for leftover placeholders
-            # Search in stage_root's expected output locations: next_theme_dir + maybe $STAGE/.config etc.
-            # To be safe, scan stage_root recursively for placeholders
-            # Also scan staged_path again? But renderer should have written to next_theme_dir
-            # We'll scan entire stage_root for any file containing {{...}}
+            # Fix #2: binary-safe placeholder scan: read as bytes, skip files with \\x00 in first 1024 bytes
             leftover = False
             for p in stage_root.rglob("*"):
                 if not p.is_file():
                     continue
-                # Skip symlinks already? but we just scan files
+                # Skip symlink files (should not exist, but be safe)
                 try:
-                    # Only scan text files; avoid binary
-                    # Read as utf-8 ignore
-                    text = p.read_text(encoding="utf-8", errors="ignore")
+                    if p.is_symlink():
+                        continue
+                except Exception:
+                    pass
+                try:
+                    data = p.read_bytes()
+                    if b"\x00" in data[:1024]:
+                        continue
+                    # Decode remainder as utf-8 ignoring errors
+                    text = data.decode("utf-8", errors="ignore")
                     if PLACEHOLDER_RE.search(text):
                         leftover = True
                         break
