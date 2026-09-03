@@ -9,10 +9,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - name: Install analyzer (dev)
         run: pip install -e ./analyzer[dev]
+
       - name: Run pytest
         run: python -m pytest analyzer/tests -q
+
+      - name: Canary — golden built-ins check (official renderer)
+        # Requires network (git clone of omacom/omarchy). Expected to pass on runners.
+        # This is the golden check: all 22 built-in themes must grade ≥ L3 at the resolved pin.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          echo "Resolving Omarchy pin..."
+          mkdir -p work
+          python -m om4t resolve-pin | tee work/pin.json
+          cat work/pin.json
+          echo "Cloning Omarchy..."
+          python -m om4t clone-omarchy --pin work/pin.json --dest work/omarchy
+          echo "Running canary with official renderer..."
+          python -m om4t canary --omarchy-dir work/omarchy --workdir work
+          echo "Canary passed — 22/22 built-ins render clean"

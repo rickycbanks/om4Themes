@@ -10,9 +10,7 @@ om4Themes grades every discoverable Omarchy theme against the Quattro release, e
 
 ## Status
 
-Phase 0–1 complete — repo scaffold, placeholder site, versioned rule tables (`analyzer/om4t/rules.py` v2026.09.0) and JSON schema (`analyzer/om4t/schema.py`).
-
-Later phases (discovery → verification → grading → site) will replace the placeholder site and wire the weekly GitHub Actions pipeline.
+Phases 0–7 built locally — scaffold, schema/rules (`v2026.09.0`), discovery/fetch/caching, static analysis, headless verification with the official Omarchy renderer (floating pin + canary gate), grading, and static site are wired. Canary live-verified **22/22** built-ins against `omacom/omarchy` **v4.0.1**; weekly cron (`0 6 * * 0`) pending repo creation. Operational details in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
 ## How to run tests
 

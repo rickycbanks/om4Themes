@@ -23,10 +23,189 @@ permissions:
 jobs:
   analyze:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: analyzer placeholder
-        run: echo "analyzer wired in Phase 7"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install analyzer
+        run: pip install -e ./analyzer
+
+      - name: Compute cache keys
+        id: cache-keys
+        run: |
+          set -e
+          RULES_VERSION="$(python -c 'from om4t.rules import RULES_VERSION; print(RULES_VERSION)' 2>/dev/null || grep -oP 'RULES_VERSION\s*=\s*"\K[^"]+' analyzer/om4t/rules.py || echo unknown)"
+          WEEK="$(date -u +%Y-%W)"
+          echo "rules_version=${RULES_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "week=${WEEK}" >> "${GITHUB_OUTPUT}"
+          echo "rules_version=${RULES_VERSION} week=${WEEK}"
+
+      - name: Restore clones cache
+        if: ${{ inputs.full_rescan != true }}
+        uses: actions/cache/restore@v4
+        with:
+          path: work/clones
+          key: om4t-clones-${{ steps.cache-keys.outputs.rules_version }}-${{ steps.cache-keys.outputs.week }}
+          restore-keys: |
+            om4t-clones-${{ steps.cache-keys.outputs.rules_version }}-
+            om4t-clones-
+
+      - name: Restore omarchy cache
+        if: ${{ inputs.full_rescan != true }}
+        uses: actions/cache/restore@v4
+        with:
+          path: work/omarchy
+          key: om4t-omarchy-${{ steps.cache-keys.outputs.rules_version }}-${{ steps.cache-keys.outputs.week }}-${{ hashFiles('analyzer/om4t/rules.py') }}
+          restore-keys: |
+            om4t-omarchy-${{ steps.cache-keys.outputs.rules_version }}-
+            om4t-omarchy-
+
+      - name: Restore results cache
+        if: ${{ inputs.full_rescan != true }}
+        uses: actions/cache/restore@v4
+        with:
+          path: work/cache.json
+          key: om4t-cache-${{ steps.cache-keys.outputs.rules_version }}-${{ steps.cache-keys.outputs.week }}
+          restore-keys: |
+            om4t-cache-${{ steps.cache-keys.outputs.rules_version }}-
+            om4t-cache-
+
+      - name: Resolve Omarchy pin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir -p work
+          if [ -n "${{ inputs.omarchy_ref }}" ]; then
+            echo "Resolving pin with override: ${{ inputs.omarchy_ref }}"
+            .venv/bin/python -m om4t resolve-pin --omarchy-ref "${{ inputs.omarchy_ref }}" | tee work/pin.json
+          else
+            .venv/bin/python -m om4t resolve-pin | tee work/pin.json
+          fi
+          # Fallback to system python if venv not present on runner
+          if [ ! -s work/pin.json ]; then
+            if [ -n "${{ inputs.omarchy_ref }}" ]; then
+              python -m om4t resolve-pin --omarchy-ref "${{ inputs.omarchy_ref }}" | tee work/pin.json
+            else
+              python -m om4t resolve-pin | tee work/pin.json
+            fi
+          fi
+          echo "Resolved pin:"
+          cat work/pin.json
+
+      - name: Clone Omarchy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if command -v python >/dev/null 2>&1 && python -c "import om4t" 2>/dev/null; then
+            PY=python
+          else
+            PY=".venv/bin/python"
+            if [ ! -x "$PY" ]; then PY=python; fi
+          fi
+          $PY -m om4t clone-omarchy --pin work/pin.json --dest work/omarchy
+          echo "Omarchy cloned to work/omarchy"
+          git -C work/omarchy rev-parse HEAD || true
+          git -C work/omarchy describe --tags || true
+
+      - name: Canary gate (official renderer)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if command -v python >/dev/null 2>&1 && python -c "import om4t" 2>/dev/null; then
+            PY=python
+          else
+            PY=".venv/bin/python"
+            if [ ! -x "$PY" ]; then PY=python; fi
+          fi
+          # Official renderer — no --fake. Non-zero exit (2) = Class A failure, job must fail.
+          $PY -m om4t canary --omarchy-dir work/omarchy --workdir work
+          echo "Canary passed"
+
+      - name: Discover themes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if command -v python >/dev/null 2>&1 && python -c "import om4t" 2>/dev/null; then
+            PY=python
+          else
+            PY=".venv/bin/python"
+            if [ ! -x "$PY" ]; then PY=python; fi
+          fi
+          $PY -m om4t discover --out work/manifest.json
+          echo "Manifest written to work/manifest.json"
+          wc -l work/manifest.json || true
+          head -n 20 work/manifest.json || true
+
+      - name: Run analyzer (official renderer, cache-aware)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir -p work/logs
+          if command -v python >/dev/null 2>&1 && python -c "import om4t" 2>/dev/null; then
+            PY=python
+          else
+            PY=".venv/bin/python"
+            if [ ! -x "$PY" ]; then PY=python; fi
+          fi
+          # Respect cache skip — needs_reanalysis uses RULES_VERSION + pin tag;
+          # new Omarchy release triggers full re-verify automatically.
+          $PY -m om4t run --manifest work/manifest.json --omarchy-dir work/omarchy --workdir work 2>&1 | tee work/logs/run.log
+          echo "Run complete"
+          ls -lh work/themes.json work/cache.json 2>&1 | tee -a work/logs/run.log || true
+
+      - name: Upload themes artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: themes
+          path: |
+            work/themes.json
+            work/logs/**
+          if-no-files-found: warn
+
+      - name: Upload pin artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pin
+          path: work/pin.json
+          if-no-files-found: warn
+
+      - name: Save clones cache
+        if: always() && inputs.full_rescan != true
+        uses: actions/cache/save@v4
+        with:
+          path: work/clones
+          key: om4t-clones-${{ steps.cache-keys.outputs.rules_version }}-${{ steps.cache-keys.outputs.week }}-${{ github.run_id }}
+
+      - name: Save omarchy cache
+        if: always() && inputs.full_rescan != true
+        uses: actions/cache/save@v4
+        with:
+          path: work/omarchy
+          key: om4t-omarchy-${{ steps.cache-keys.outputs.rules_version }}-${{ steps.cache-keys.outputs.week }}-${{ github.run_id }}
+
+      - name: Save results cache
+        if: always() && inputs.full_rescan != true
+        uses: actions/cache/save@v4
+        with:
+          path: work/cache.json
+          key: om4t-cache-${{ steps.cache-keys.outputs.rules_version }}-${{ steps.cache-keys.outputs.week }}-${{ github.run_id }}
 
   deploy:
     needs: analyze
@@ -35,15 +214,120 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Download themes artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: themes
+          path: _artifact_themes
+
       - uses: actions/checkout@v4
+
       - uses: actions/configure-pages@v4
         # TODO: re-verify action versions (plan §13) before Phase 7 — check latest major of configure-pages / upload-pages-artifact / deploy-pages
+
       - name: Assemble site
         run: |
+          set -e
           mkdir -p _site
           cp -r site/* _site/
-      - uses: actions/upload-pages-artifact@v3
+          # EXCLUDE any repo-local site/data sample — the artifact data is authoritative
+          rm -f _site/data/themes.json
+          rm -rf _site/data
+          mkdir -p _site/data
+          echo "Copying authoritative themes.json from artifact"
+          ls -lh _artifact_themes/ || true
+          cat _artifact_themes/work/themes.json > _site/data/themes.json 2>/dev/null || \
+          cat _artifact_themes/themes.json > _site/data/themes.json 2>/dev/null || \
+          cp _artifact_themes/**/themes.json _site/data/themes.json 2>/dev/null || \
+          cp _artifact_themes/themes.json _site/data/themes.json
+          echo "Assembled _site/data/themes.json:"
+          ls -lh _site/data/themes.json
+          head -n 20 _site/data/themes.json || true
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
           path: _site
-      - id: deployment
+
+      - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
+
+  notify:
+    needs: analyze
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download pin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pin
+          path: work
+        continue-on-error: true
+
+      - name: File or comment pipeline-breakage issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          # gh is preinstalled on ubuntu-latest runners; no install needed
+          which gh || echo "gh not found, attempting install fallback"
+          PIN_TAG="$(jq -r '.tag // .pin // empty' work/pin.json 2>/dev/null || echo unknown)"
+          PIN_SHA="$(jq -r '.commit_sha // .commit // empty' work/pin.json 2>/dev/null || echo unknown)"
+          PIN_SOURCE="$(jq -r '.pin_source // empty' work/pin.json 2>/dev/null || echo unknown)"
+          if [ -z "$PIN_TAG" ]; then PIN_TAG="unknown"; fi
+          if [ -z "$PIN_SHA" ]; then PIN_SHA="unknown"; fi
+          if [ -z "$PIN_SOURCE" ]; then PIN_SOURCE="unknown"; fi
+          DATE="$(date -u +%Y-%m-%d)"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ATTEMPT="${{ github.run_attempt }}"
+          REPO="${{ github.repository }}"
+          ISSUE_TITLE="Class A pipeline breakage (${DATE})"
+
+          echo "Checking for open pipeline-breakage issues..."
+          OPEN_JSON="$(gh issue list --label pipeline-breakage --state open --json number 2>/dev/null || echo '[]')"
+          echo "Open issues: ${OPEN_JSON}"
+          ISSUE_NUMBER="$(echo "${OPEN_JSON}" | jq -r '.[0].number // empty' 2>/dev/null || echo "")"
+
+          # Build sanitized body via here-doc
+          BODY_FILE="$(mktemp)"
+          cat > "${BODY_FILE}" <<EOF2
+          **Class A pipeline breakage** — the weekly analyze job failed.
+
+          - **Repo:** ${REPO}
+          - **Run:** ${RUN_URL} (attempt ${ATTEMPT})
+          - **Date:** ${DATE}
+          - **Resolved pin:** tag=\`${PIN_TAG}\` sha=\`${PIN_SHA}\` source=\`${PIN_SOURCE}\`
+          - **Failure class:** Class A — canary or release-resolution failure (no deploy; Pages keeps last-good)
+
+          **What failed:** inspect the Actions log for the failing step (likely \`Canary gate\` or \`Resolve Omarchy pin\`). The canary exiting with 2 means the pipeline contract broke, not the ecosystem.
+
+          **Next steps:** see \`docs/RUNBOOK.md\` § Recovering from a pipeline-breakage issue.
+
+          _This issue was auto-filed by the \`notify\` job. If an open \`pipeline-breakage\` issue already existed, this run added a comment instead._
+          EOF2
+
+          COMMENT_FILE="$(mktemp)"
+          cat > "${COMMENT_FILE}" <<EOF3
+          **Follow-up failure** on ${DATE} — another weekly run failed.
+
+          - **Run:** ${RUN_URL} (attempt ${ATTEMPT})
+          - **Resolved pin:** tag=\`${PIN_TAG}\` sha=\`${PIN_SHA}\` source=\`${PIN_SOURCE}\`
+
+          See run logs for details. Original issue remains open until the canary passes.
+          EOF3
+
+          # Attempt to include a short log excerpt if available (artifact logs not in this job, but runner logs may exist)
+          # We sanitize to avoid leaking secrets — only include repo/run/pin info above.
+
+          if [ -n "${ISSUE_NUMBER}" ] && [ "${ISSUE_NUMBER}" != "null" ]; then
+            echo "Found open issue #${ISSUE_NUMBER} — adding comment"
+            gh issue comment "${ISSUE_NUMBER}" --body-file "${COMMENT_FILE}"
+          else
+            echo "No open pipeline-breakage issue — creating new one"
+            gh issue create --label pipeline-breakage --title "${ISSUE_TITLE}" --body-file "${BODY_FILE}"
+          fi
+          echo "Notify step complete"
