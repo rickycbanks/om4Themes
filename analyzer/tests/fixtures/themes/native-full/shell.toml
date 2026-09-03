@@ -1,0 +1,13 @@
+# shell override for native-full — realistic Quattro keys
+window-fill-alpha = 0.85
+bar-border-alpha = 0.6
+corner-radius = 12
+corner = 8
+border-width = 2
+border_alpha = 0.7
+custom = "rgba(255, 0, 0, 0.5)"
+gradient-border = "linear-gradient(to right, #ff00ff, #00ffff)"
+
+[border-gradient]
+from = "#ff00ff"
+to = "#00ffff"
