@@ -3,22 +3,106 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="om4Themes — theme compatibility observatory grading every discoverable Omarchy 4 (Quattro) theme with compatibility levels, badges, and per-check reasoning." />
   <title>om4Themes — Omarchy 4 Theme Compatibility Observatory</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f1115'/%3E%3Ccircle cx='16' cy='16' r='8' fill='none' stroke='%237aa2f7' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%237aa2f7'/%3E%3Cpath d='M22 22 L27 27' stroke='%237aa2f7' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header>
+  <a class="skip-link" href="#theme-grid">Skip to theme grid</a>
+
+  <header class="site-header" role="banner">
     <h1>om4Themes</h1>
-    <p>Theme compatibility observatory for Omarchy 4 / Quattro</p>
+    <p class="tagline">Theme compatibility observatory for <a href="https://github.com/omacom/omarchy" target="_blank" rel="noopener">Omarchy 4 — Quattro</a></p>
+
+    <div class="header-stats" id="header-stats" aria-live="polite">
+      <span class="stat"><strong id="stat-total">—</strong> themes</span>
+      <span class="stat">generated <strong id="stat-generated">—</strong></span>
+      <span class="stat">rules <strong id="stat-rules">—</strong></span>
+      <span class="stat">Omarchy <strong id="stat-pin">—</strong> <span id="stat-pin-source"></span></span>
+      <span class="stat" id="stat-commit" style="display:none">commit <code id="stat-commit-sha">—</code></span>
+    </div>
   </header>
-  <main>
-    <p class="placeholder">om4Themes — coming soon — Phase 6 will replace this.</p>
-    <p>Browse <a href="https://github.com/omacom/omarchy">omacom/omarchy</a> themes graded against the latest Quattro release.</p>
-    <noscript>This site requires JavaScript for filtering; the JSON database is at <code>data/themes.json</code>.</noscript>
+
+  <main class="site-main" id="main">
+    <section class="filters" aria-label="Filters">
+      <div class="filters-grid">
+        <fieldset class="filter-group">
+          <legend>Compatibility level</legend>
+          <div class="checkbox-row" id="level-filters">
+            <label><input type="checkbox" value="0" checked /> ❌ Incompatible</label>
+            <label><input type="checkbox" value="1" checked /> 🟠 Legacy</label>
+            <label><input type="checkbox" value="2" checked /> 🟡 Compatible</label>
+            <label><input type="checkbox" value="3" checked /> 🟢 Native</label>
+            <label><input type="checkbox" value="4" checked /> 💚 Verified</label>
+          </div>
+        </fieldset>
+
+        <div class="filter-group">
+          <label for="filter-mode">Mode</label>
+          <select id="filter-mode">
+            <option value="all">All modes</option>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label for="filter-official">Source</label>
+          <select id="filter-official">
+            <option value="all">All sources</option>
+            <option value="official">Official only</option>
+            <option value="community">Community only</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label for="filter-creator">Creator</label>
+          <select id="filter-creator">
+            <option value="all">All creators</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label for="filter-search">Search</label>
+          <input id="filter-search" type="search" placeholder="Name, creator, description…" autocomplete="off" />
+        </div>
+
+        <div class="filter-group">
+          <label for="filter-sort">Sort</label>
+          <select id="filter-sort">
+            <option value="level">Level → Stars (default)</option>
+            <option value="stars">Stars</option>
+            <option value="name">Name (A–Z)</option>
+            <option value="recent">Recently analyzed</option>
+          </select>
+        </div>
+      </div>
+      <div class="filter-actions">
+        <button type="button" class="btn-reset" id="btn-reset">Reset filters</button>
+        <span class="sr-only" id="filter-help">Filters combine with AND logic and update the URL hash for sharing.</span>
+      </div>
+    </section>
+
+    <div class="status-bar" aria-live="polite">
+      <span id="result-count" role="status" aria-live="polite">Loading themes…</span>
+      <span id="status-extra" class="sr-only"></span>
+    </div>
+
+    <div id="theme-grid" class="grid" role="list" tabindex="-1"></div>
+
+    <noscript>
+      <div class="error-state" role="alert">
+        <p><strong>JavaScript is required</strong> for filtering and sorting. The raw database is available at <code>data/themes.json</code>.</p>
+        <p>Enable JavaScript or fetch the JSON directly.</p>
+      </div>
+    </noscript>
   </main>
-  <footer>
-    <p><a href="../spec.md">Spec</a> · <a href="../implementation-plan.md">Plan</a> · <a href="../implementation-checklist.md">Checklist</a></p>
+
+  <footer class="site-footer">
+    <p>Built from <a href="data/themes.json">data/themes.json</a> · Rules versioned, Omarchy floating pin · <a href="https://github.com/omacom/omarchy">omacom/omarchy</a></p>
   </footer>
+
   <script src="app.js"></script>
 </body>
 </html>

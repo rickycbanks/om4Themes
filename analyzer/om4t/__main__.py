@@ -193,7 +193,8 @@ def _cmd_discover(args):
 
 def _cmd_run(args):
     manifest_path = Path(args.manifest) if hasattr(args, "manifest") else Path(args.manifest_path)
-    omarchy_dir = Path(args.omarchy_dir) if hasattr(args, "omarchy_dir") else None
+    _od = getattr(args, "omarchy_dir", None)
+    omarchy_dir = Path(_od) if _od else None
     workdir = Path(args.workdir) if hasattr(args, "workdir") and args.workdir else Path("work")
     limit = getattr(args, "limit", None)
     fake_renderer = getattr(args, "fake_renderer", False) or getattr(args, "fake", False)
@@ -596,7 +597,7 @@ def main():
     p_run = sub.add_parser("run", help="full pipeline")
     p_run.add_argument("--manifest", required=True, help="path to manifest.json")
     p_run.add_argument("--manifest-path", dest="manifest", help=argparse.SUPPRESS)
-    p_run.add_argument("--omarchy-dir", required=True, help="omarchy checkout dir")
+    p_run.add_argument("--omarchy-dir", required=False, default=None, help="omarchy checkout dir (required unless --offline or --fake-renderer)")
     p_run.add_argument("--omarchy_dir", dest="omarchy_dir", help=argparse.SUPPRESS)
     p_run.add_argument("--workdir", default="work", help="workdir")
     p_run.add_argument("--work-dir", dest="workdir", help=argparse.SUPPRESS)
