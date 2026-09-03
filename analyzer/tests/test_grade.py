@@ -92,11 +92,11 @@ def test_alacritty_ceiling_never_above():
 
 
 def test_L2_requires_colors_and_render():
-    static = _static(has_colors=True, valid=True, legacy_hard=False, uses_sanitizer=True)  # not modern, so stays L2
-    verify = _verify(render_clean=True, stripped=[])
-    # modern false => stays 2, but also legacy_hard false, modern false => 2
+    # Stripping is warning-only now; even with referenced terminal configs, a valid palette that renders clean is L4
+    static = _static(has_colors=True, valid=True, legacy_hard=False, uses_sanitizer=True)
+    verify = _verify(render_clean=True, stripped=[{"file": "ghostty.conf", "reason": "x"}])
     lvl = determine_level(static, verify)
-    assert lvl == 2
+    assert lvl == 4  # was 2 before stripped cap, now warning-only
 
 
 def test_L3_adds_no_hard_legacy_and_modern():
@@ -132,11 +132,17 @@ def test_legacy_hard_caps_at_1_if_valid():
 
 
 def test_L4_not_without_install_clean():
-    # Appearance-critical stripped (referenced .lua) caps at L2 via modern_conventions, so never reaches L4
-    static = _static(has_colors=True, valid=True, legacy_hard=False, uses_sanitizer=True)
-    verify = _verify(render_clean=True, stripped=[{"file": "a.lua", "reason": "x"}])
-    lvl = determine_level(static, verify)
-    assert lvl == 2  # modern False => cap at L2, install_sim_clean false
+    # L4 now fails only on render/error, not on stripped files
+    static = _static(has_colors=True, valid=True, legacy_hard=False, uses_sanitizer=False)
+    # Case 1: render not clean → L0 (not L4)
+    verify = _verify(render_clean=False, stripped=[], error=None)
+    assert determine_level(static, verify) == 0
+    # Case 2: error present → install_clean false → stays L3 (render clean but error)
+    verify2 = _verify(render_clean=True, stripped=[], error="render error")
+    assert determine_level(static, verify2) == 3
+    # Stripped alone must NOT block L4
+    verify3 = _verify(render_clean=True, stripped=[{"file": "a.lua", "reason": "x"}], error=None)
+    assert determine_level(static, verify3) == 4
 
 
 def test_unreferenced_lua_does_not_block_L4():
@@ -148,9 +154,48 @@ def test_unreferenced_lua_does_not_block_L4():
     rec = grade_theme(None, static, verify, pin, {"id": "a/b", "full_name": "a/b"})
     assert rec.compatibility.level == 4
     assert "headless-verified" in rec.badges
-    # Stripped files must appear as warning, never silent
-    assert any("dropped by sanitizer" in w and "neovim.lua" in w for w in rec.warnings)
+    # Stripped files must appear as warning with new wording, never silent
+    assert any("will be regenerated from palette by Omarchy" in w and "neovim.lua" in w for w in rec.warnings)
     assert any(c.id == "install_sim_clean" and c.passed for c in rec.checks)
+
+
+def test_referenced_neovim_does_not_block_L4():
+    """Referenced neovim.lua (even with uses_sanitizer True) must NOT cap — warning only."""
+    static = _static(has_colors=True, valid=True, legacy_hard=False, uses_sanitizer=True)
+    verify = _verify(render_clean=True, stripped=[{"file": "neovim.lua", "reason": "x"}])
+    assert determine_level(static, verify) == 4
+    pin = _pin()
+    rec = grade_theme(None, static, verify, pin, {"id": "a/b", "full_name": "a/b"})
+    assert rec.compatibility.level == 4
+    assert any("will be regenerated from palette by Omarchy" in w and "neovim.lua" in w for w in rec.warnings)
+    assert any(c.id == "modern_conventions" and c.passed for c in rec.checks)
+    assert any(c.id == "install_sim_clean" and c.passed for c in rec.checks)
+
+
+def test_nested_palette_collection_repo_reason(tmp_path):
+    """Collection repo with colors deep (themes/a/colors.toml) → L0 with precise reason."""
+    # Simulate collection repo: root has no colors.toml, but 2 nested palettes at depth 3+
+    repo = tmp_path / "collection"
+    repo.mkdir()
+    (repo / "themes").mkdir()
+    (repo / "themes" / "a").mkdir()
+    (repo / "themes" / "b").mkdir()
+    (repo / "themes" / "a" / "colors.toml").write_text('mode="dark"\nbackground="#000"\n')
+    (repo / "themes" / "b" / "colors.toml").write_text('mode="dark"\nbackground="#111"\n')
+    # Need README to avoid legacy hard? Not needed
+    from om4t.static import analyze_repo
+
+    static = analyze_repo(repo)
+    assert static.has_colors_toml is False
+    assert static.nested_palette_count == 2
+    verify = _verify(render_clean=False, stripped=[])
+    pin = _pin()
+    rec = grade_theme(repo, static, verify, pin, {"id": "owner/collection", "full_name": "owner/collection"})
+    assert rec.compatibility.level == 0
+    # Check note mentions nested palettes
+    c = next(x for x in rec.checks if x.id == "colors_toml_valid")
+    assert "found 2 nested palettes" in c.note
+    assert "collection/toolkit repo" in c.note
 
 
 def test_grade_populates_schema_fields():

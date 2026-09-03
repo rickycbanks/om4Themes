@@ -61,6 +61,8 @@ class StaticFindings:
     legacy: list[LegacyFinding]
     badges: set[str]
     uses_sanitizer_stripped_for_appearance: bool
+    # Count of colors.toml found deeper than root+1 (up to 4 levels) — for collection repos; 0 if none or if has_colors true
+    nested_palette_count: int = 0
 
 
 _HEX_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
@@ -530,6 +532,32 @@ def detect_badges(repo_dir: str | Path, palette: PaletteFindings | None = None) 
     return badges
 
 
+def _count_nested_palettes(repo_dir: Path, max_depth: int = 4) -> int:
+    """
+    Count colors.toml files deeper than root+1 (up to max_depth) for collection repos.
+    Cheap walk only in failure path — not for grading.
+    """
+    count = 0
+    try:
+        # Use rglob but limit depth by checking relative parts
+        for p in repo_dir.rglob("colors.toml"):
+            if not p.is_file():
+                continue
+            try:
+                rel = p.relative_to(repo_dir)
+            except Exception:
+                continue
+            depth = len(rel.parts)  # e.g., themes/a/colors.toml -> 3
+            # find_palette covers depth 1 (colors.toml) and depth 2 (subdir/colors.toml)
+            # So nested is depth >2 and <= max_depth+1? max_depth=4 means rel.parts up to 5 (including file)
+            # For max_depth 4, allow depths 3,4,5 (themes/a/colors.toml depth3, themes/a/b/colors.toml depth4, etc.)
+            if 3 <= depth <= max_depth + 1:
+                count += 1
+    except Exception:
+        pass
+    return count
+
+
 def analyze_repo(repo_dir: str | Path) -> StaticFindings:
     """
     Full repo analysis bundling palette, alacritty, legacy, badges, sanitizer heuristic.
@@ -617,6 +645,11 @@ def analyze_repo(repo_dir: str | Path) -> StaticFindings:
             # Already covered via name check; if none, then not referenced.
             uses_sanitizer = False
 
+    # Count nested palettes only in failure path (no root palette) — for collection repos up to 4 levels
+    nested_count = 0
+    if not has_colors:
+        nested_count = _count_nested_palettes(repo, max_depth=4)
+
     return StaticFindings(
         has_colors_toml=has_colors,
         colors_toml_valid=colors_toml_valid,
@@ -628,4 +661,5 @@ def analyze_repo(repo_dir: str | Path) -> StaticFindings:
         legacy=legacy,
         badges=badges,
         uses_sanitizer_stripped_for_appearance=uses_sanitizer,
+        nested_palette_count=nested_count,
     )

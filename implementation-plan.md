@@ -128,8 +128,8 @@ Inputs (all machine-computed):
 - `render_clean` — after staging + sanitization (§9), `omarchy-theme-set-templates` exits 0 and no `{{…}}` remains in any rendered output (assertion copied from Omarchy's `test/cli`).
 - `legacy_hard` — the theme *requires* removed components to express itself: README/install scripts reference Waybar/Walker/Mako/SwayOSD/hyprlock config as the theme's implementation, require a `hyprland.conf` override, or require `~/.config/omarchy/current` (old state path).
 - `legacy_soft` — stale Omarchy 3 files present but the colors.toml works standalone → **warning only, never auto-fail** (explicit spec rule: "a repo may simply contain stale junk").
-- `modern_conventions` — customization beyond colors uses current mechanisms (`shell*.toml`, semantic tokens); the theme's appearance does not depend on files the sanitizer strips (`*.lua`, terminal configs, `vscode.json`).
-- `install_sim_clean` — the full pipeline (stage → sanitize → synthesize-if-needed → render) completes with no *appearance-affecting* file stripped.
+- `modern_conventions` — no hard-legacy findings and native `colors.toml` palette (true at L2+); note is `Custom Quickshell styling ✓` when `shell*.toml` present else `Current Quattro mechanisms ✓` (2026-09-02 revision: stripped files are regenerated from palette — warning, not cap).
+- `install_sim_clean` — the full pipeline (stage → sanitize → synthesize-if-needed → render) completes without errors (`render_clean` and no error; stripping is warning-only — every stripped file has a template in `default/themed/` and will be regenerated from palette).
 
 Tree (first match wins):
 
@@ -267,7 +267,7 @@ jobs:
       "preview": "https://raw.githubusercontent.com/…/preview.png",
       "mode": "dark",
       "compatibility": {
-        "family": "omarchy-4", "level": 3, "label": "quattro-native",
+        "family": "omarchy-4", "level": 4, "label": "quattro-verified",
         "tested_against": "v4.0.2", "omarchy_commit": "…",
         "analyzed_at": "2026-09-02T06:12:33Z", "rules_version": "2026.09.0"
       },
@@ -275,12 +275,12 @@ jobs:
         { "id": "colors_toml_valid", "passed": true, "note": null },
         { "id": "renderer_clean", "passed": true, "note": null },
         { "id": "no_required_legacy", "passed": true, "note": null },
-        { "id": "modern_conventions", "passed": true, "note": "shell.toml present" },
-        { "id": "install_sim_clean", "passed": false, "note": "neovim.lua dropped by sanitizer" }
+        { "id": "modern_conventions", "passed": true, "note": "Custom Quickshell styling ✓" },
+        { "id": "install_sim_clean", "passed": true, "note": "Install simulation clean ✓" }
       ],
-      "badges": ["transparency", "rounded-ui", "wallpapers"],
+      "badges": ["transparency", "rounded-ui", "wallpapers", "headless-verified"],
       "palette": { "missing_canonical": [], "resolved_via_alias": ["cursor"] },
-      "warnings": ["stale waybar/style.css present but unreferenced"],
+      "warnings": ["stale waybar/style.css present but unreferenced", "2 file(s) will be regenerated from palette by Omarchy: neovim.lua, vscode.json"],
       "error": null
     }
   ]

@@ -22,24 +22,26 @@ def _has_legacy_hard(static: StaticFindings) -> bool:
 
 def determine_level(static: StaticFindings, verify: VerifyResult) -> int:
     """
-    Decision tree per plan §8 with caps:
+    Decision tree per plan §8 with caps (2026-09-02 revision: stripped files are regenerated from palette — warning, not cap):
     - alacritty-derived ceiling 1
     - legacy_soft warnings only, never demote
     - legacy hard caps at 1 if colors_valid else 0
     - L2 requires colors_valid AND render_clean
-    - L3 adds no hard-legacy + modern_conventions (not uses_sanitizer)
-    - L4 adds install_sim_clean (render_clean and no appearance-critical stripped)
+    - L3 adds no hard-legacy + modern_conventions (no hard-legacy and native colors.toml palette)
+    - L4 adds install_sim_clean (render_clean and no error; stripping is warning-only)
     Returns level 0-4.
+    Rationale: every sanitizer-stripped file (*.lua, alacritty.toml, foot.ini, ghostty.conf, kitty.conf, vscode.json)
+    has a corresponding template in default/themed/ (neovim.lua.tpl etc.) — Omarchy regenerates them from colors.toml,
+    so stripping does not break a valid-palette theme. Appearance loss is warning, not cap.
     """
     colors_valid = static.colors_toml_valid
     alacritty = static.alacritty_usable
     render_clean = verify.render_clean
     legacy_hard = _has_legacy_hard(static)
-    modern = not static.uses_sanitizer_stripped_for_appearance
-    # install_sim_clean: per spec L4 = "installs/sanitizes/renders ... completes without errors"
-    # Stripping per se is not a failure — standard files (neovim.lua, terminal configs) are regenerated from palette.
-    # Appearance-critical stripping is already captured by modern_conventions (caps at L2).
-    install_clean = render_clean and verify.error is None and modern
+    # modern_conventions: no hard-legacy and native colors.toml palette (true at L2+); not falsified by stripped files
+    modern = (not legacy_hard) and colors_valid
+    # install_sim_clean: render_clean and no error — stripping irrelevant (warning-only)
+    install_clean = render_clean and verify.error is None
 
     has_palette = colors_valid or alacritty
 
@@ -87,8 +89,10 @@ def determine_level(static: StaticFindings, verify: VerifyResult) -> int:
 def _build_checks(static: StaticFindings, verify: VerifyResult) -> list[CheckResult]:
     colors_valid = static.colors_toml_valid
     legacy_hard = _has_legacy_hard(static)
-    modern = not static.uses_sanitizer_stripped_for_appearance
-    install_clean = verify.render_clean and verify.error is None and modern
+    modern = (not legacy_hard) and colors_valid
+    install_clean = verify.render_clean and verify.error is None
+    # For modern_conventions note: check if custom shell present via badges
+    has_custom_shell = "custom-shell" in (static.badges or set())
 
     checks: list[CheckResult] = []
     # Order = evaluation order per task
@@ -100,7 +104,12 @@ def _build_checks(static: StaticFindings, verify: VerifyResult) -> list[CheckRes
         # Also add alacritty check for why?
         checks.append(CheckResult(id="alacritty_convertible", passed=True, note="alacritty.toml convertible ✓"))
     else:
-        checks.append(CheckResult(id="colors_toml_valid", passed=False, note="No valid palette"))
+        # No valid palette at root+1 — check for deeper nested palettes (collection repo)
+        nested = getattr(static, "nested_palette_count", 0)
+        if nested and nested > 0:
+            checks.append(CheckResult(id="colors_toml_valid", passed=False, note=f"No colors.toml at repo root (found {nested} nested palettes — collection/toolkit repo, not directly installable)"))
+        else:
+            checks.append(CheckResult(id="colors_toml_valid", passed=False, note="No valid palette"))
 
     # 2. renderer_clean
     if verify.render_clean:
@@ -116,20 +125,20 @@ def _build_checks(static: StaticFindings, verify: VerifyResult) -> list[CheckRes
         hard_ids = [f.marker_id for f in static.legacy if f.severity == "hard"]
         checks.append(CheckResult(id="no_required_legacy", passed=False, note=f"Legacy hard: {', '.join(hard_ids)}"))
 
-    # 4. modern_conventions
+    # 4. modern_conventions — no hard legacy and native palette; shell*.toml presence drives note
     if modern:
-        checks.append(CheckResult(id="modern_conventions", passed=True, note="Custom Quickshell styling ✓" if verify.render_clean else "Modern conventions ✓"))
+        note = "Custom Quickshell styling ✓" if has_custom_shell else "Current Quattro mechanisms ✓"
+        checks.append(CheckResult(id="modern_conventions", passed=True, note=note))
     else:
-        checks.append(CheckResult(id="modern_conventions", passed=False, note="Uses sanitizer-stripped file for appearance"))
+        # Only fails when hard legacy present or non-native palette (stripping is warning-only per 2026-09-02 revision)
+        checks.append(CheckResult(id="modern_conventions", passed=False, note="Legacy hard or non-native palette"))
 
-    # 5. install_sim_clean
+    # 5. install_sim_clean — render_clean and no error; stripping is warning-only (regenerated via templates)
     if install_clean:
         checks.append(CheckResult(id="install_sim_clean", passed=True, note="Install simulation clean ✓"))
     else:
         if not verify.render_clean:
             note = "render not clean"
-        elif not modern:
-            note = "appearance depends on stripped file"
         elif verify.error:
             note = verify.error[:200]
         else:
@@ -225,16 +234,13 @@ def grade_theme(
     # Also add parse_error as warning?
     if static.parse_error:
         warnings.append(f"colors.toml parse error: {static.parse_error}")
-    # Stripped files are warnings (regenerated from palette) when not appearance-critical
-    if verify.stripped and not static.uses_sanitizer_stripped_for_appearance:
+    # Stripped files are warning-only: every sanitizer-stripped file has a template in default/themed/
+    # (neovim.lua.tpl etc.) — Omarchy regenerates them from colors.toml
+    if verify.stripped:
         files = ", ".join(s["file"] for s in verify.stripped[:5])
         if len(verify.stripped) > 5:
             files += f", +{len(verify.stripped)-5} more"
-        warnings.append(f"{len(verify.stripped)} file(s) dropped by sanitizer (regenerated from palette): {files}")
-    elif verify.stripped and static.uses_sanitizer_stripped_for_appearance:
-        # Appearance-critical stripping already caps level, also warn
-        files = ", ".join(s["file"] for s in verify.stripped[:5])
-        warnings.append(f"{len(verify.stripped)} file(s) dropped by sanitizer (appearance-critical): {files}")
+        warnings.append(f"{len(verify.stripped)} file(s) will be regenerated from palette by Omarchy: {files}")
     # Add synthesize info?
     if verify.synthesized_colors:
         warnings.append("colors synthesized from alacritty.toml")
