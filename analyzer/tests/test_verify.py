@@ -170,8 +170,27 @@ def _make_fake_omarchy(tmp_path: Path) -> Path:
     themed_dir = fake / "default" / "themed"
     themed_dir.mkdir(parents=True)
     # Minimal template files (content irrelevant, fake script ignores them but they exist)
-    (themed_dir / "alacritty.toml.tpl").write_text("background = {{ background }}\n")
-    (themed_dir / "ghostty.conf.tpl").write_text("background={{ background }}\n")
+    # Create all real Omarchy templates so targeted scan covers them
+    for name in [
+        "alacritty.toml.tpl",
+        "btop.theme.tpl",
+        "chromium.theme.tpl",
+        "claude.json.tpl",
+        "foot.ini.tpl",
+        "ghostty.conf.tpl",
+        "gum_env.lua.tpl",
+        "helix.toml.tpl",
+        "hyprland-preview-share-picker.css.tpl",
+        "hyprland.lua.tpl",
+        "keyboard.rgb.tpl",
+        "kitty.conf.tpl",
+        "neovim.lua.tpl",
+        "obsidian.css.tpl",
+        "pi.json.tpl",
+        "shell.toml.tpl",
+        "vscode-theme.json.tpl",
+    ]:
+        (themed_dir / name).write_text("background = {{ background }}\n")
 
     # Stub omarchy-theme-color
     color_stub = bin_dir / "omarchy-theme-color"
@@ -251,10 +270,10 @@ def test_official_renderer_placeholder_failure_and_skip(tmp_path):
     theme = tmp_path / "theme_src2"
     theme.mkdir()
     (theme / "colors.toml").write_text('mode="dark"\nbackground="#112233"\n')
-    # Theme-shipped file that contains unrendered placeholder and will be copied to next-theme
-    # Name it so fake renderer will NOT overwrite: ghostty.conf already handled as skip case
-    # We'll use a file that the fake script doesn't generate, e.g. extra.conf with placeholder
-    (theme / "extra.conf").write_text("value = {{ leftover_placeholder }}\n")
+    # Theme-shipped override with placeholder that matches a template output name
+    # Fake script skips writing if file already exists, so placeholder remains and must be detected
+    # Use btop.theme which is a real template output (btop.theme.tpl) and not sanitizer-denied
+    (theme / "btop.theme").write_text("value = {{ leftover_placeholder }}\n")
 
     stage_root = tmp_path / "stage2"
     stage_root.mkdir()
@@ -262,9 +281,68 @@ def test_official_renderer_placeholder_failure_and_skip(tmp_path):
 
     renderer = OfficialRenderer(fakeOM)
     clean, code, log = renderer.render(res.staged_path)
-    # Should be not clean because extra.conf still contains {{
+    # Should be not clean because btop.theme still contains {{
     assert code == 0
     assert clean is False, f"expected placeholder detection, log: {log}"
+    assert "btop.theme" in log
+
+
+def test_official_renderer_ignores_readme_placeholder(tmp_path):
+    """README containing {{ must not affect render_clean — scan only template outputs."""
+    from om4t.verify import OfficialRenderer, stage_theme
+
+    fakeOM = _make_fake_omarchy(tmp_path)
+
+    theme = tmp_path / "theme_readme_placeholder"
+    theme.mkdir()
+    (theme / "colors.toml").write_text('mode="dark"\nbackground="#123456"\nforeground="#ffffff"\n')
+    (theme / "README.md").write_text("This is {{ not_a_placeholder }} in docs\n")
+
+    stage_root = tmp_path / "stage_readme_placeholder"
+    stage_root.mkdir()
+    res = stage_theme(theme, stage_root, is_git_installed=True)
+
+    renderer = OfficialRenderer(fakeOM)
+    clean, code, log = renderer.render(res.staged_path)
+    assert code == 0
+    assert clean is True, f"README placeholder should be ignored, log: {log}"
+
+
+def test_official_renderer_override_placeholder_names_file(tmp_path):
+    """Theme-shipped override with {{ must fail and list filename."""
+    from om4t.verify import OfficialRenderer, stage_theme
+
+    fakeOM = _make_fake_omarchy(tmp_path)
+
+    theme = tmp_path / "theme_override_named"
+    theme.mkdir()
+    (theme / "colors.toml").write_text('mode="dark"\nbackground="#123456"\n')
+    # btop.theme is a real template output (btop.theme.tpl)
+    (theme / "btop.theme").write_text("color = {{ x }}\n")
+
+    stage_root = tmp_path / "stage_override_named"
+    stage_root.mkdir()
+    res = stage_theme(theme, stage_root, is_git_installed=True)
+
+    renderer = OfficialRenderer(fakeOM)
+    # Extend fake script to also handle btop.theme skip? Our fake script only handles alacritty/ghostty,
+    # so btop.theme will be copied and not overwritten (since fake doesn't write it), still contains placeholder.
+    # Need to ensure fake script doesn't overwrite btop.theme — it doesn't, so placeholder remains.
+    clean, code, log = renderer.render(res.staged_path)
+    # Fake script will still succeed (exit 0) but btop.theme remains with placeholder
+    # However our fake script only checks colors.toml and writes alacritty/ghostty, so btop.theme stays
+    # Targeted scan should detect btop.theme
+    # To make it work, we need to manually ensure the file is in next-theme (copied via _copy_staged_to_next)
+    # Our renderer will scan it if it exists
+    assert code == 0
+    # This may be True if btop.theme not in targeted list? It is in templates, so should be detected
+    # Check existence
+    next_theme = stage_root / ".local" / "state" / "omarchy" / "current" / "next-theme"
+    # Need to handle that our fake script doesn't know about btop.theme, but file was copied
+    # So clean should be False
+    # If our targeted scan only checks existing outputs, btop.theme exists and has placeholder
+    assert clean is False
+    assert "btop.theme" in log
 
 
 def test_official_renderer_relative_path(tmp_path, monkeypatch):

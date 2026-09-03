@@ -163,18 +163,20 @@ def _default_transport(path: str) -> tuple[int, dict, Any]:
 
 def _add_pagination(path: str, page: int, per_page: int = 100) -> str:
     # Inject per_page and page query params
+    # Search API pagination cap: max 1000 results / 10 pages (per_page=100)
+    import re
+
     sep = "&" if "?" in path else "?"
-    # avoid duplicating if already present
+    # avoid duplicating per_page if already present
     if "per_page=" not in path:
         path = f"{path}{sep}per_page={per_page}"
         sep = "&"
-    if "page=" not in path:
+    # Check for page param as distinct query param (&page= or ?page=), not inside per_page
+    if re.search(r"[?&]page=", path) is None:
         path = f"{path}{sep}page={page}"
     else:
-        # replace existing page param (simple)
-        import re
-
-        path = re.sub(r"page=\d+", f"page={page}", path)
+        # replace existing page param precisely (avoid matching per_page)
+        path = re.sub(r"([?&]page=)\d+", rf"\g<1>{page}", path)
     return path
 
 

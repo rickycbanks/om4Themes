@@ -299,18 +299,32 @@ def detect_legacy(repo_dir: str | Path) -> list[LegacyFinding]:
     all_files = _collect_all_files(repo)
     rel_files = [(f, f.relative_to(repo)) for f in all_files]
 
-    # Collect text file contents for reference check
+    # Collect text file contents for reference check (exclude docs/examples etc for hard-require heuristic)
     text_candidates = _get_text_file_candidates(repo)
     combined_text = ""
     text_contents: dict[Path, str] = {}
     for tf in text_candidates:
         try:
+            rel_tf = tf.relative_to(repo)
+            # Exclude docs/examples etc from reference check for hard markers
+            if rel_tf.parts and rel_tf.parts[0].lower() in {"examples", "docs", "screenshots", "previews"}:
+                continue
             txt = tf.read_text(encoding="utf-8", errors="ignore")
             text_contents[tf] = txt
             combined_text += "\n" + txt
         except Exception:
             continue
     combined_lower = combined_text.lower()
+
+    # Subtrees to exclude from legacy marker file presence (docs/examples not part of installed theme)
+    _EXCLUDED_PREFIXES = {"examples", "docs", "screenshots", "previews"}
+
+    def _is_excluded(rel: Path) -> bool:
+        # Exclude if first part is in excluded set (e.g., docs/foo, examples/bar)
+        parts = rel.parts
+        if not parts:
+            return False
+        return parts[0].lower() in _EXCLUDED_PREFIXES
 
     findings: list[LegacyFinding] = []
 
@@ -323,6 +337,8 @@ def detect_legacy(repo_dir: str | Path) -> list[LegacyFinding]:
         if globs:
             matched_files: list[Path] = []
             for f, rel in rel_files:
+                if _is_excluded(rel):
+                    continue
                 for pat in globs:
                     if _glob_matches(rel, pat):
                         matched_files.append(f)

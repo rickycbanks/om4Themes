@@ -102,3 +102,64 @@ def test_gh_api_success_direct():
 
     data = gh_api("some/path", transport=transport)
     assert data == {"hello": "world"}
+
+
+def test_add_pagination_per_page_and_page():
+    from om4t.http import _add_pagination
+
+    # No existing params
+    assert _add_pagination("search/repositories?q=topic:omarchy-theme", 1) == "search/repositories?q=topic:omarchy-theme&per_page=100&page=1"
+    assert _add_pagination("search/repositories?q=topic:omarchy-theme", 2) == "search/repositories?q=topic:omarchy-theme&per_page=100&page=2"
+    # Existing per_page must not be corrupted when updating page
+    assert _add_pagination("search/repositories?q=topic:x&per_page=100&page=1", 2) == "search/repositories?q=topic:x&per_page=100&page=2"
+    assert _add_pagination("search/repositories?q=topic:x&per_page=100&page=9", 10) == "search/repositories?q=topic:x&per_page=100&page=10"
+    # Ensure per_page substring not confused with page
+    assert "per_page=100" in _add_pagination("search/repositories?q=topic:x", 1)
+    # Already has per_page, should preserve it
+    assert _add_pagination("search/repositories?q=topic:x&per_page=50&page=1", 2) == "search/repositories?q=topic:x&per_page=50&page=2"
+
+
+def test_gh_api_paginate_aggregates_multi_page_with_per_page_100():
+    from om4t.http import gh_api
+
+    requested_urls = []
+
+    def transport(path):
+        requested_urls.append(path)
+        # Simulate GitHub search pagination: page 1 = 100 items, page 2 = 50 items, page 3 would be 0 but we stop after <100
+        import re
+
+        m = re.search(r"[?&]page=(\d+)", path)
+        page = int(m.group(1)) if m else 1
+        # Verify per_page=100 in every request (regression for per_page=1 leak)
+        assert "per_page=100" in path, f"expected per_page=100 in {path}"
+        assert re.search(r"[?&]page=", path), f"expected page param in {path}"
+        if page == 1:
+            items = [{"full_name": f"owner/repo{i}", "id": i} for i in range(100)]
+            return (200, {}, {"total_count": 150, "items": items})
+        elif page == 2:
+            items = [{"full_name": f"owner/repo{i+100}", "id": i + 100} for i in range(50)]
+            return (200, {}, {"total_count": 150, "items": items})
+        else:
+            return (200, {}, {"total_count": 150, "items": []})
+
+    data = gh_api("search/repositories?q=topic:omarchy-theme+is:public", paginate=True, transport=transport)
+    assert isinstance(data, list)
+    assert len(data) == 150
+    assert data[0]["full_name"] == "owner/repo0"
+    assert data[149]["full_name"] == "owner/repo149"
+    # Ensure we stopped after short page (no extra call for page 3)
+    assert len(requested_urls) == 2
+    assert all("per_page=100" in u for u in requested_urls)
+
+
+def test_gh_api_paginate_single_page_short():
+    from om4t.http import gh_api
+
+    def transport(path):
+        assert "per_page=100" in path
+        items = [{"full_name": f"owner/repo{i}"} for i in range(5)]
+        return (200, {}, {"total_count": 5, "items": items})
+
+    data = gh_api("search/repositories?q=topic:omarchy-theme+is:public", paginate=True, transport=transport)
+    assert len(data) == 5

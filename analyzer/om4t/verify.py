@@ -318,28 +318,41 @@ class OfficialRenderer:
             if exit_code != 0:
                 return (False, exit_code, log)
 
-            # Fix #2: binary-safe placeholder scan: read as bytes, skip files with \\x00 in first 1024 bytes
-            leftover = False
-            for p in stage_root.rglob("*"):
-                if not p.is_file():
-                    continue
-                # Skip symlink files (should not exist, but be safe)
-                try:
-                    if p.is_symlink():
+            # Placeholder scan: only rendered config files (Omarchy invariant)
+            # Scan for each template's output if it exists (covers renderer-written + theme-shipped overrides)
+            offending: list[str] = []
+            try:
+                templates_dir = self.omarchy_dir / "default" / "themed"
+                for tpl in templates_dir.glob("*.tpl"):
+                    basename = tpl.name[:-4]  # strip .tpl -> e.g. alacritty.toml, ghostty.conf
+                    out_path = next_theme_dir / basename
+                    if not out_path.is_file():
                         continue
-                except Exception:
-                    pass
-                try:
-                    data = p.read_bytes()
-                    if b"\x00" in data[:1024]:
+                    try:
+                        if out_path.is_symlink():
+                            continue
+                    except Exception:
+                        pass
+                    try:
+                        data = out_path.read_bytes()
+                        if b"\x00" in data[:1024]:
+                            continue
+                        text = data.decode("utf-8", errors="ignore")
+                        if PLACEHOLDER_RE.search(text):
+                            offending.append(basename)
+                    except Exception:
                         continue
-                    # Decode remainder as utf-8 ignoring errors
-                    text = data.decode("utf-8", errors="ignore")
-                    if PLACEHOLDER_RE.search(text):
-                        leftover = True
-                        break
-                except Exception:
-                    continue
+            except Exception:
+                # If templates_dir missing, fall back to no offending
+                offending = []
+
+            if offending:
+                # Append readable list to log for error note
+                extra = f"placeholders remain: {', '.join(sorted(offending))}"
+                log = (log + "\n" + extra).strip() if log else extra
+                leftover = True
+            else:
+                leftover = False
 
             render_clean = not leftover and exit_code == 0
             return (render_clean, exit_code, log)
@@ -455,7 +468,8 @@ def verify_theme(theme_dir: str | Path, work_root: str | Path, renderer, *, is_g
             if not render_clean:
                 error = f"render exit {exit_code}: {log_excerpt[:500]}"
         elif not render_clean and exit_code == 0:
-            error = f"placeholders remain: {log_excerpt[:500]}"
+            # log_excerpt already contains "placeholders remain: ..." from renderer (list of template outputs)
+            error = log_excerpt[:500] if log_excerpt else "placeholders remain"
 
         return VerifyResult(
             render_clean=render_clean,
