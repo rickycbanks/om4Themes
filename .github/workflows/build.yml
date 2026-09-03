@@ -214,13 +214,13 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download themes artifact
         uses: actions/download-artifact@v4
         with:
           name: themes
           path: _artifact_themes
-
-      - uses: actions/checkout@v4
 
       - uses: actions/configure-pages@v4
         # TODO: re-verify action versions (plan §13) before Phase 7 — check latest major of configure-pages / upload-pages-artifact / deploy-pages
@@ -231,15 +231,18 @@ jobs:
           mkdir -p _site
           cp -r site/* _site/
           # EXCLUDE any repo-local site/data sample — the artifact data is authoritative
-          rm -f _site/data/themes.json
           rm -rf _site/data
           mkdir -p _site/data
           echo "Copying authoritative themes.json from artifact"
-          ls -lh _artifact_themes/ || true
-          cat _artifact_themes/work/themes.json > _site/data/themes.json 2>/dev/null || \
-          cat _artifact_themes/themes.json > _site/data/themes.json 2>/dev/null || \
-          cp _artifact_themes/**/themes.json _site/data/themes.json 2>/dev/null || \
-          cp _artifact_themes/themes.json _site/data/themes.json
+          ls -R _artifact_themes || true
+          THEMES_JSON="$(find _artifact_themes -name themes.json -print -quit)"
+          if [ -z "$THEMES_JSON" ]; then
+            echo "ERROR: themes.json not found under _artifact_themes" >&2
+            find _artifact_themes -type f | head -n 100 >&2 || true
+            exit 1
+          fi
+          echo "Found themes.json at: $THEMES_JSON"
+          cp "$THEMES_JSON" _site/data/themes.json
           echo "Assembled _site/data/themes.json:"
           ls -lh _site/data/themes.json
           head -n 20 _site/data/themes.json || true
@@ -254,7 +257,7 @@ jobs:
         uses: actions/deploy-pages@v4
 
   notify:
-    needs: analyze
+    needs: [analyze, deploy]
     if: failure()
     runs-on: ubuntu-latest
     steps:
