@@ -118,6 +118,7 @@ class RunSummary:
     analyzed: int
     errors: int
     skipped_unchanged: int
+    built_at: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -125,6 +126,7 @@ class RunSummary:
             "analyzed": self.analyzed,
             "errors": self.errors,
             "skipped_unchanged": self.skipped_unchanged,
+            "built_at": self.built_at,
         }
 
     @classmethod
@@ -134,6 +136,7 @@ class RunSummary:
             analyzed=d["analyzed"],
             errors=d["errors"],
             skipped_unchanged=d["skipped_unchanged"],
+            built_at=d.get("built_at", ""),
         )
 
 

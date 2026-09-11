@@ -64,7 +64,7 @@ def _golden_db() -> ThemesDB:
             pin_source="latest",
             commit="deadbeef1234567890abcdef1234567890abcdef12",
         ),
-        run=RunSummary(discovered=267, analyzed=265, errors=2, skipped_unchanged=180),
+        run=RunSummary(discovered=267, analyzed=265, errors=2, skipped_unchanged=180, built_at="2026-09-02"),
         themes=[_golden_theme()],
     )
 

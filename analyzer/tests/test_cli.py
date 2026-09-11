@@ -58,6 +58,7 @@ def test_cli_run_offline_with_fake_renderer():
         assert db.schema_version == 1
         # Check run summary
         assert db.run.discovered >= 1
+        assert db.run.built_at, "built_at should be populated"
 
 
 def test_cli_resolve_pin_help():

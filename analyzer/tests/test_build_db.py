@@ -51,6 +51,8 @@ def test_build_db_basic():
     assert db.omarchy.pin_source == "latest"
     assert db.run.discovered == 2
     assert len(db.themes) == 2
+    import re
+    assert re.match(r"^\d{4}-\d{2}-\d{2}$", db.run.built_at), f"built_at not YYYY-MM-DD: {db.run.built_at!r}"
     db.validate()
 
 

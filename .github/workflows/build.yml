@@ -210,7 +210,7 @@ jobs:
   deploy:
     needs: analyze
     runs-on: ubuntu-latest
-    permissions: { contents: write, pages: write, id-token: write }
+    permissions: { contents: read, pages: write, id-token: write }
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -257,22 +257,6 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Stamp last build date in README
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
-          DATE="$(date -u +%Y-%m-%d)"
-          sed -Ei "s/^(\*\*Last full build:\*\* )[^<]*(<!-- last-build-date -->)/\1${DATE} \2/" README.md
-          if git diff --quiet README.md; then
-            echo "README stamp unchanged"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -am "chore: update last build stamp (${DATE}) [skip ci]"
-            git push
-          fi
-
   notify:
     needs: [analyze, deploy]
     if: failure()
@@ -305,7 +289,30 @@ jobs:
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           ATTEMPT="${{ github.run_attempt }}"
           REPO="${{ github.repository }}"
-          ISSUE_TITLE="Class A pipeline breakage (${DATE})"
+
+          # Determine which job failed to produce an accurate issue
+          ANALYZE_RESULT="${{ needs.analyze.result }}"
+          DEPLOY_RESULT="${{ needs.deploy.result }}"
+
+          if [ "${ANALYZE_RESULT}" = "failure" ]; then
+            ISSUE_TITLE="Class A pipeline breakage (${DATE})"
+            FAILURE_SUMMARY="**Class A pipeline breakage** — the analyze job (canary/pin/renderer) failed. No deploy ran."
+            FAILURE_CLASS="Class A — canary or release-resolution failure (no deploy; Pages keeps last-good)"
+            WHAT_FAILED="inspect the Actions log for the failing step (likely \`Canary gate\` or \`Resolve Omarchy pin\`). The canary exiting with 2 means the pipeline contract broke, not the ecosystem."
+          elif [ "${DEPLOY_RESULT}" = "failure" ]; then
+            ISSUE_TITLE="Deploy failure (${DATE})"
+            FAILURE_SUMMARY="**Deploy failure** — the analyze job succeeded (canary passed) but the deploy job failed. Pages may have partially deployed."
+            FAILURE_CLASS="Deploy-step failure (canary passed; site may be partially updated)"
+            WHAT_FAILED="inspect the Actions log for the failing step in the \`deploy\` job (e.g. artifact assembly, Pages upload, or deploy-pages). The canary and grading passed — this is an infra/deploy issue, not a contract break."
+          else
+            ISSUE_TITLE="Pipeline failure (${DATE})"
+            FAILURE_SUMMARY="**Pipeline failure** — a weekly run did not complete successfully."
+            FAILURE_CLASS="Unclassified — inspect the run log for details."
+            WHAT_FAILED="inspect the Actions log for the failing step."
+          fi
+
+          echo "Failure source: analyze=${ANALYZE_RESULT} deploy=${DEPLOY_RESULT}"
+          echo "Issue title: ${ISSUE_TITLE}"
 
           echo "Checking for open pipeline-breakage issues..."
           OPEN_JSON="$(gh issue list --label pipeline-breakage --state open --json number 2>/dev/null || echo '[]')"
@@ -315,15 +322,15 @@ jobs:
           # Build sanitized body via here-doc
           BODY_FILE="$(mktemp)"
           cat > "${BODY_FILE}" <<EOF2
-          **Class A pipeline breakage** — the weekly analyze job failed.
+          ${FAILURE_SUMMARY}
 
           - **Repo:** ${REPO}
           - **Run:** ${RUN_URL} (attempt ${ATTEMPT})
           - **Date:** ${DATE}
           - **Resolved pin:** tag=\`${PIN_TAG}\` sha=\`${PIN_SHA}\` source=\`${PIN_SOURCE}\`
-          - **Failure class:** Class A — canary or release-resolution failure (no deploy; Pages keeps last-good)
+          - **Failure class:** ${FAILURE_CLASS}
 
-          **What failed:** inspect the Actions log for the failing step (likely \`Canary gate\` or \`Resolve Omarchy pin\`). The canary exiting with 2 means the pipeline contract broke, not the ecosystem.
+          **What failed:** ${WHAT_FAILED}
 
           **Next steps:** see \`docs/RUNBOOK.md\` § Recovering from a pipeline-breakage issue.
 
@@ -335,13 +342,11 @@ jobs:
           **Follow-up failure** on ${DATE} — another weekly run failed.
 
           - **Run:** ${RUN_URL} (attempt ${ATTEMPT})
+          - **Failure source:** analyze=${ANALYZE_RESULT} deploy=${DEPLOY_RESULT}
           - **Resolved pin:** tag=\`${PIN_TAG}\` sha=\`${PIN_SHA}\` source=\`${PIN_SOURCE}\`
 
-          See run logs for details. Original issue remains open until the canary passes.
+          See run logs for details. Original issue remains open until the pipeline is green.
           EOF3
-
-          # Attempt to include a short log excerpt if available (artifact logs not in this job, but runner logs may exist)
-          # We sanitize to avoid leaking secrets — only include repo/run/pin info above.
 
           if [ -n "${ISSUE_NUMBER}" ] && [ "${ISSUE_NUMBER}" != "null" ]; then
             echo "Found open issue #${ISSUE_NUMBER} — adding comment"
