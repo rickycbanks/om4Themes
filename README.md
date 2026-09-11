@@ -3,8 +3,7 @@
 ![Build](https://img.shields.io/github/actions/workflow/status/rickycbanks/om4Themes/build.yml?branch=main&label=build)
 ![Pages](https://img.shields.io/github/deployments/rickycbanks/om4Themes/github-pages?label=pages)
 ![Themes graded](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Frickycbanks.github.io%2Fom4Themes%2Fdata%2Fthemes.json&query=%24.run.analyzed&label=themes%20graded&color=blueviolet)
-
-**Last full build:** 2026-09-03 <!-- last-build-date -->
+![Last build](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Frickycbanks.github.io%2Fom4Themes%2Fdata%2Fthemes.json&query=%24.run.built_at&label=last%20build&color=blue)
 
 **Live site → https://rickycbanks.github.io/om4Themes/**
 

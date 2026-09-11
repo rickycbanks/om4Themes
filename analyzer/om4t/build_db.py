@@ -44,6 +44,12 @@ def build_db(theme_records: list[ThemeRecord | dict], run_meta: dict | Any) -> T
         commit=pin.commit_sha,
     )
 
+    # generated_at — computed early so built_at can be derived for RunSummary
+    generated_at = run_meta.get("generated_at") if isinstance(run_meta, dict) else getattr(run_meta, "generated_at", None)
+    if not generated_at:
+        generated_at = utc_now_iso()
+    built_at = generated_at[:10]  # YYYY-MM-DD
+
     # RunSummary
     if isinstance(run_meta, dict):
         discovered = int(run_meta.get("discovered", len(theme_records)))
@@ -61,6 +67,7 @@ def build_db(theme_records: list[ThemeRecord | dict], run_meta: dict | Any) -> T
         analyzed=analyzed,
         errors=errors,
         skipped_unchanged=skipped,
+        built_at=built_at,
     )
 
     # Coerce theme_records to ThemeRecord, per-theme try/except
@@ -130,10 +137,6 @@ def build_db(theme_records: list[ThemeRecord | dict], run_meta: dict | Any) -> T
     # We'll keep run.errors as provided, but if we added error placeholders, increment?
     # The task says build_db should set RunSummary with discovered, analyzed, errors, skipped_unchanged from run_meta, per-theme errors isolated into JSON error field, never abort.
     # So we don't need to auto-increment run.errors; keep as meta.
-
-    generated_at = run_meta.get("generated_at") if isinstance(run_meta, dict) else getattr(run_meta, "generated_at", None)
-    if not generated_at:
-        generated_at = utc_now_iso()
 
     rules_version = run_meta.get("rules_version") if isinstance(run_meta, dict) else getattr(run_meta, "rules_version", None)
     if not rules_version:

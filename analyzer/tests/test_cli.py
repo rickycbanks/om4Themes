@@ -9,8 +9,7 @@ from om4t.schema import ThemesDB
 
 
 def _run_cli(args, cwd=None):
-    # Use .venv/bin/python
-    cmd = [".venv/bin/python", "-m", "om4t"] + args
+    cmd = [sys.executable, "-m", "om4t"] + args
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     return result
 
@@ -58,6 +57,7 @@ def test_cli_run_offline_with_fake_renderer():
         assert db.schema_version == 1
         # Check run summary
         assert db.run.discovered >= 1
+        assert db.run.built_at, "built_at should be populated"
 
 
 def test_cli_resolve_pin_help():
